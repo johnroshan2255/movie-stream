@@ -64,8 +64,8 @@ const Movie = sequelize.define('movies', {
   indexes: [
     {
       unique: true,
-      fields: ['movie_name', 'torrent_magnet'],
-      name: 'unique_movie_name_magnet'
+      fields: ['movie_name'],
+      name: 'unique_movie_name'
     },
     {
       fields: ['movie_name']

@@ -17,7 +17,7 @@ export const errorHandler = (err, req, res, next) => {
 
   // Sequelize unique constraint error
   if (err.name === 'SequelizeUniqueConstraintError') {
-    if (err.errors[0].path === 'unique_movie_name_magnet') {
+    if (err.errors[0].path === 'unique_movie_name') {
       return res.status(400).json({
         success: false,
         message: 'A movie with this name and torrent magnet already exists'
