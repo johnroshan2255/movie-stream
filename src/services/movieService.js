@@ -63,12 +63,26 @@ class MovieService {
 
     const offset = (page - 1) * limit;
     let whereClause = {};
-    let metadataWhere = {};
     
-    if (search && search.trim()) {
+    // Check if search parameter exists
+    if (search !== undefined) {
+      // If search is provided but empty or whitespace, return no results
+      if (!search.trim()) {
+        return {
+          movies: [],
+          pagination: {
+            total: 0,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            totalPages: 0
+          }
+        };
+      }
+      
+      // If search has valid content, perform search
       const searchLower = search.trim().toLowerCase();
       
-      // Search in movie_name OR in movie_data JSON OR in metadata genres
+      // Search in movie_name OR in metadata genres
       whereClause = {
         [Op.or]: [
           // Search in movie name
@@ -76,19 +90,12 @@ class MovieService {
             sequelize.fn('LOWER', sequelize.col('movies.movie_name')),
             { [Op.like]: `%${searchLower}%` }
           ),
-          // Search in movie_data JSON for genre
-          sequelize.where(
-            sequelize.fn('LOWER', sequelize.col('movies.movie_data')),
-            { [Op.like]: `%"genre"%${searchLower}%` }
-          ),
-          // Search in metadata genres
-          sequelize.where(
-            sequelize.fn('LOWER', sequelize.fn('JSON_EXTRACT', sequelize.col('metadata.genres'), '$')),
-            { [Op.like]: `%${searchLower}%` }
-          )
+          // Search in metadata genres - simple LIKE on JSON column
+          sequelize.literal(`LOWER(\`metadata\`.\`genres\`) LIKE '%${searchLower}%'`)
         ]
       };
     }
+    // If search parameter is not provided at all, return all movies (whereClause remains {})
 
     const { count, rows: movies } = await Movie.findAndCountAll({
       where: whereClause,
@@ -150,6 +157,19 @@ class MovieService {
   }
 
   async searchMovies(searchTerm, pagination = {}) {
+    // If search term is provided but empty or whitespace, return no results
+    if (searchTerm !== undefined && !searchTerm.trim()) {
+      return {
+        movies: [],
+        pagination: {
+          total: 0,
+          page: parseInt(pagination.page || 1),
+          limit: parseInt(pagination.limit || 10),
+          totalPages: 0
+        }
+      };
+    }
+
     if (!searchTerm || searchTerm.trim().length === 0) {
       throw { statusCode: 400, message: 'Search term is required' };
     }
@@ -176,16 +196,8 @@ class MovieService {
             sequelize.fn('LOWER', sequelize.col('movies.movie_name')),
             { [Op.like]: `%${searchLower}%` }
           ),
-          // Search in movie_data JSON for genre
-          sequelize.where(
-            sequelize.fn('LOWER', sequelize.col('movies.movie_data')),
-            { [Op.like]: `%"genre"%${searchLower}%` }
-          ),
-          // Search in metadata genres
-          sequelize.where(
-            sequelize.fn('LOWER', sequelize.fn('JSON_EXTRACT', sequelize.col('metadata.genres'), '$')),
-            { [Op.like]: `%${searchLower}%` }
-          )
+          // Search in metadata genres - simple LIKE on JSON column
+          sequelize.literal(`LOWER(\`metadata\`.\`genres\`) LIKE '%${searchLower}%'`)
         ]
       },
       include: [
