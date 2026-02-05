@@ -1,6 +1,7 @@
 import { DataTypes } from 'sequelize';
 import bcrypt from 'bcryptjs';
 import sequelize from '../config/database.js';
+import { UserTypeValues, UserType } from '../enums/index.js';
 
 const User = sequelize.define('users', {
   id: {
@@ -44,6 +45,14 @@ const User = sequelize.define('users', {
     validate: {
       notEmpty: true,
       len: [6, 255]
+    }
+  },
+  user_type: {
+    type: DataTypes.ENUM(...UserTypeValues),
+    allowNull: false,
+    defaultValue: UserType.USER,
+    validate: {
+      isIn: [UserTypeValues]
     }
   },
   is_active: {

@@ -55,7 +55,7 @@ export const createMovie = async (req, res, next) => {
 
 export const updateMovie = async (req, res, next) => {
   try {
-    const movie = await movieService.updateMovie(req.params.id, req.body, req.user.id);
+    const movie = await movieService.updateMovie(req.params.id, req.body);
 
     res.status(200).json({
       success: true,
@@ -69,7 +69,7 @@ export const updateMovie = async (req, res, next) => {
 
 export const deleteMovie = async (req, res, next) => {
   try {
-    await movieService.deleteMovie(req.params.id, req.user.id);
+    await movieService.deleteMovie(req.params.id);
 
     res.status(200).json({
       success: true,

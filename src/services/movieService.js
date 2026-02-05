@@ -1,6 +1,7 @@
-import { Movie, User } from '../models/index.js';
+import { Movie, User, MovieMetadata } from '../models/index.js';
 import { Op } from 'sequelize';
 import sequelize from '../config/database.js';
+import tmdbService from './tmdbService.js';
 
 class MovieService {
   validateMovieData(data, isUpdate = false) {
@@ -62,22 +63,28 @@ class MovieService {
 
     const offset = (page - 1) * limit;
     let whereClause = {};
+    let metadataWhere = {};
     
     if (search && search.trim()) {
       const searchLower = search.trim().toLowerCase();
       
-      // Search in movie_name OR in movie_data JSON (genre field)
+      // Search in movie_name OR in movie_data JSON OR in metadata genres
       whereClause = {
         [Op.or]: [
           // Search in movie name
           sequelize.where(
-            sequelize.fn('LOWER', sequelize.col('movie_name')),
+            sequelize.fn('LOWER', sequelize.col('movies.movie_name')),
             { [Op.like]: `%${searchLower}%` }
           ),
           // Search in movie_data JSON for genre
           sequelize.where(
-            sequelize.fn('LOWER', sequelize.col('movie_data')),
+            sequelize.fn('LOWER', sequelize.col('movies.movie_data')),
             { [Op.like]: `%"genre"%${searchLower}%` }
+          ),
+          // Search in metadata genres
+          sequelize.where(
+            sequelize.fn('LOWER', sequelize.fn('JSON_EXTRACT', sequelize.col('metadata.genres'), '$')),
+            { [Op.like]: `%${searchLower}%` }
           )
         ]
       };
@@ -85,14 +92,22 @@ class MovieService {
 
     const { count, rows: movies } = await Movie.findAndCountAll({
       where: whereClause,
-      include: [{
-        model: User,
-        as: 'user',
-        attributes: ['uuid', 'username', 'email']
-      }],
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['uuid', 'username', 'email']
+        },
+        {
+          model: MovieMetadata,
+          as: 'metadata',
+          required: false
+        }
+      ],
       limit: parseInt(limit),
       offset: parseInt(offset),
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'DESC']],
+      distinct: true
     });
 
     return {
@@ -113,11 +128,18 @@ class MovieService {
 
     const movie = await Movie.findOne({
       where: { uuid: movieUuid },
-      include: [{
-        model: User,
-        as: 'user',
-        attributes: ['uuid', 'username', 'email']
-      }]
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['uuid', 'username', 'email']
+        },
+        {
+          model: MovieMetadata,
+          as: 'metadata',
+          required: false
+        }
+      ]
     });
 
     if (!movie) {
@@ -151,24 +173,37 @@ class MovieService {
         [Op.or]: [
           // Search in movie name
           sequelize.where(
-            sequelize.fn('LOWER', sequelize.col('movie_name')),
+            sequelize.fn('LOWER', sequelize.col('movies.movie_name')),
             { [Op.like]: `%${searchLower}%` }
           ),
           // Search in movie_data JSON for genre
           sequelize.where(
-            sequelize.fn('LOWER', sequelize.col('movie_data')),
+            sequelize.fn('LOWER', sequelize.col('movies.movie_data')),
             { [Op.like]: `%"genre"%${searchLower}%` }
+          ),
+          // Search in metadata genres
+          sequelize.where(
+            sequelize.fn('LOWER', sequelize.fn('JSON_EXTRACT', sequelize.col('metadata.genres'), '$')),
+            { [Op.like]: `%${searchLower}%` }
           )
         ]
       },
-      include: [{
-        model: User,
-        as: 'user',
-        attributes: ['uuid', 'username', 'email']
-      }],
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['uuid', 'username', 'email']
+        },
+        {
+          model: MovieMetadata,
+          as: 'metadata',
+          required: false
+        }
+      ],
       limit: parseInt(limit),
       offset: parseInt(offset),
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'DESC']],
+      distinct: true
     });
 
     return {
@@ -214,10 +249,26 @@ class MovieService {
       user_id: userId
     });
 
+    // Check if movie_data has an 'id' field to fetch metadata from TMDB API
+    if (movie_data && movie_data.id) {
+      try {
+        const tmdbData = await tmdbService.fetchMovieMetadata(movie_data.id);
+        const metadataFields = tmdbService.extractMetadata(tmdbData);
+        
+        await MovieMetadata.create({
+          movie_id: movie.id,
+          ...metadataFields
+        });
+      } catch (error) {
+        console.error('Failed to fetch TMDB metadata:', error);
+        // Don't throw error - movie creation should succeed even if metadata fetch fails
+      }
+    }
+
     return await this.getMovieById(movie.uuid);
   }
 
-  async updateMovie(movieUuid, movieData, userId) {
+  async updateMovie(movieUuid, movieData) {
     if (!movieUuid || typeof movieUuid !== 'string') {
       throw { statusCode: 400, message: 'Invalid movie ID' };
     }
@@ -232,10 +283,6 @@ class MovieService {
 
     if (!movie) {
       throw { statusCode: 404, message: 'Movie not found' };
-    }
-
-    if (movie.user_id !== userId) {
-      throw { statusCode: 403, message: 'Not authorized to update this movie' };
     }
 
     const { movie_name, movie_data, torrent_magnet, movie_image_url } = movieData;
@@ -273,7 +320,7 @@ class MovieService {
     return await this.getMovieById(movie.uuid);
   }
 
-  async deleteMovie(movieUuid, userId) {
+  async deleteMovie(movieUuid) {
     if (!movieUuid || typeof movieUuid !== 'string') {
       throw { statusCode: 400, message: 'Invalid movie ID' };
     }
@@ -282,10 +329,6 @@ class MovieService {
 
     if (!movie) {
       throw { statusCode: 404, message: 'Movie not found' };
-    }
-
-    if (movie.user_id !== userId) {
-      throw { statusCode: 403, message: 'Not authorized to delete this movie' };
     }
 
     await movie.destroy();
@@ -305,11 +348,18 @@ class MovieService {
 
     const { count, rows: movies } = await Movie.findAndCountAll({
       where: { user_id: userId },
-      include: [{
-        model: User,
-        as: 'user',
-        attributes: ['uuid', 'username', 'email']
-      }],
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['uuid', 'username', 'email']
+        },
+        {
+          model: MovieMetadata,
+          as: 'metadata',
+          required: false
+        }
+      ],
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [['created_at', 'DESC']]
