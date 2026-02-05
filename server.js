@@ -14,14 +14,13 @@ const startServer = async () => {
     await sequelize.authenticate();
     console.log('✅ Database connection established successfully.');
 
-    // Sync database models
-    // Use force: true only in development when you need to recreate tables
-    // For UUID migration: DROP DATABASE movie_stream; CREATE DATABASE movie_stream;
-    // const syncOptions = process.env.DB_FORCE_SYNC === 'true' 
-      // ? { force: true } 
-      // : { alter: true };
+    // Sync database models (creates tables if they don't exist)
+    // Set DB_FORCE_SYNC=true in .env to drop and recreate all tables (development only)
+    const syncOptions = process.env.DB_FORCE_SYNC === 'true' 
+      ? { force: true } 
+      : {};
     
-    await sequelize.sync();
+    await sequelize.sync(syncOptions);
     console.log('✅ Database models synchronized.');
 
     // Start server

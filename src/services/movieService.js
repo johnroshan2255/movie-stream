@@ -1,5 +1,6 @@
 import { Movie, User } from '../models/index.js';
 import { Op } from 'sequelize';
+import sequelize from '../config/database.js';
 
 class MovieService {
   validateMovieData(data, isUpdate = false) {
@@ -60,10 +61,26 @@ class MovieService {
     }
 
     const offset = (page - 1) * limit;
-    const whereClause = {};
+    let whereClause = {};
     
     if (search && search.trim()) {
-      whereClause.movie_name = { [Op.like]: `%${search.trim()}%` };
+      const searchLower = search.trim().toLowerCase();
+      
+      // Search in movie_name OR in movie_data JSON (genre field)
+      whereClause = {
+        [Op.or]: [
+          // Search in movie name
+          sequelize.where(
+            sequelize.fn('LOWER', sequelize.col('movie_name')),
+            { [Op.like]: `%${searchLower}%` }
+          ),
+          // Search in movie_data JSON for genre
+          sequelize.where(
+            sequelize.fn('LOWER', sequelize.col('movie_data')),
+            { [Op.like]: `%"genre"%${searchLower}%` }
+          )
+        ]
+      };
     }
 
     const { count, rows: movies } = await Movie.findAndCountAll({
@@ -127,10 +144,22 @@ class MovieService {
     }
 
     const offset = (page - 1) * limit;
+    const searchLower = searchTerm.trim().toLowerCase();
 
     const { count, rows: movies } = await Movie.findAndCountAll({
       where: {
-        movie_name: { [Op.like]: `%${searchTerm.trim()}%` }
+        [Op.or]: [
+          // Search in movie name
+          sequelize.where(
+            sequelize.fn('LOWER', sequelize.col('movie_name')),
+            { [Op.like]: `%${searchLower}%` }
+          ),
+          // Search in movie_data JSON for genre
+          sequelize.where(
+            sequelize.fn('LOWER', sequelize.col('movie_data')),
+            { [Op.like]: `%"genre"%${searchLower}%` }
+          )
+        ]
       },
       include: [{
         model: User,
@@ -162,17 +191,18 @@ class MovieService {
 
     const { movie_name, movie_data, torrent_magnet, movie_image_url } = movieData;
 
-    const existingMovie = await Movie.findOne({
-      where: {
-        movie_name: movie_name.trim(),
-        torrent_magnet: torrent_magnet.trim()
-      }
+    // Check if movie name already exists (case-insensitive)
+    const existingMovieByName = await Movie.findOne({
+      where: sequelize.where(
+        sequelize.fn('LOWER', sequelize.col('movie_name')),
+        sequelize.fn('LOWER', movie_name.trim())
+      )
     });
 
-    if (existingMovie) {
+    if (existingMovieByName) {
       throw { 
         statusCode: 400, 
-        message: 'A movie with this name and torrent magnet already exists' 
+        message: 'A movie with this name already exists' 
       };
     }
 
@@ -215,7 +245,22 @@ class MovieService {
       movie_image_url: movie_image_url ? movie_image_url.trim() : movie.movie_image_url
     };
 
-    if (movie_name && movie_name.trim()) {
+    // Check if updating movie name and if it conflicts with existing (case-insensitive)
+    if (movie_name && movie_name.trim() && movie_name.trim().toLowerCase() !== movie.movie_name.toLowerCase()) {
+      const existingMovieByName = await Movie.findOne({
+        where: sequelize.where(
+          sequelize.fn('LOWER', sequelize.col('movie_name')),
+          sequelize.fn('LOWER', movie_name.trim())
+        )
+      });
+
+      if (existingMovieByName && existingMovieByName.id !== movie.id) {
+        throw { 
+          statusCode: 400, 
+          message: 'A movie with this name already exists' 
+        };
+      }
+
       updateData.movie_name = movie_name.trim();
     }
 

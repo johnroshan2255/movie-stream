@@ -63,11 +63,6 @@ const Movie = sequelize.define('movies', {
   updatedAt: 'updated_at',
   indexes: [
     {
-      unique: true,
-      fields: ['movie_name'],
-      name: 'unique_movie_name'
-    },
-    {
       fields: ['movie_name']
     },
     {
