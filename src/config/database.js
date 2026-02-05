@@ -1,4 +1,5 @@
 import { Sequelize } from 'sequelize';
+import mysql2 from 'mysql2'; // ← Import at top
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -6,9 +7,9 @@ dotenv.config();
 let sequelize;
 
 if (process.env.DB_URL) {
-  // Production / TiDB Cloud
   sequelize = new Sequelize(process.env.DB_URL, {
     dialect: 'mysql',
+    dialectModule: mysql2, // ← Use the imported module
     logging: process.env.NODE_ENV === 'development' ? console.log : false,
     dialectOptions: {
       ssl: {
@@ -17,7 +18,7 @@ if (process.env.DB_URL) {
       }
     },
     pool: {
-      max: 5,
+      max: 2,
       min: 0,
       acquire: 30000,
       idle: 10000
