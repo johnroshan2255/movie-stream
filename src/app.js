@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import authRoutes from './routes/authRoutes.js';
 import movieRoutes from './routes/movieRoutes.js';
+import torrentRoutes from './routes/torrentRoutes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -23,6 +24,7 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/movies', movieRoutes);
+app.use('/api/torrents', torrentRoutes);
 
 // 404 Handler
 app.use('*', (req, res) => {
