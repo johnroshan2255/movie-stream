@@ -1,4 +1,5 @@
 import torrent1337x from '../torrent/1337x.js';
+import torrentYTS from '../torrent/yts.js';
 
 export const searchTorrents = async (req, res, next) => {
   try {
@@ -12,7 +13,14 @@ export const searchTorrents = async (req, res, next) => {
       });
     }
 
-    const torrents = await torrent1337x(query.trim(), String(page));
+    const torrentService = req.query.service || 'yts';
+    let torrents = null;
+
+    if (torrentService === '1337x') {
+      torrents = await torrent1337x(query.trim(), String(page), true);
+    } else if (torrentService === 'yts') {
+      torrents = await torrentYTS(query.trim(), String(page), true);
+    }
 
     if (torrents === null) {
       return res.status(502).json({

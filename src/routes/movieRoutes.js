@@ -27,4 +27,5 @@ router.post('/', checkAdmin, createMovie);
 router.put('/:id', checkAdmin, updateMovie);
 router.delete('/:id', checkAdmin, deleteMovie);
 
+
 export default router;

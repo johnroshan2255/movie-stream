@@ -238,44 +238,50 @@ class MovieService {
 
     const { movie_name, movie_data, torrent_magnet, movie_image_url } = movieData;
 
-    // Check if movie name already exists (case-insensitive)
-    const existingMovieByName = await Movie.findOne({
-      where: sequelize.where(
-        sequelize.fn('LOWER', sequelize.col('movie_name')),
-        sequelize.fn('LOWER', movie_name.trim())
-      )
-    });
-
-    if (existingMovieByName) {
-      throw { 
-        statusCode: 400, 
-        message: 'A movie with this name already exists' 
-      };
-    }
-
-    const movie = await Movie.create({
-      movie_name: movie_name.trim(),
-      movie_data,
-      torrent_magnet: torrent_magnet.trim(),
-      movie_image_url: movie_image_url?.trim(),
-      user_id: userId
-    });
-
-    // Check if movie_data has an 'id' field to fetch metadata from TMDB API
+    // Fetch TMDB metadata before transaction so we don't hold a DB connection during HTTP
+    let metadataFields = null;
     if (movie_data && movie_data.id) {
       try {
         const tmdbData = await tmdbService.fetchMovieMetadata(movie_data.id);
-        const metadataFields = tmdbService.extractMetadata(tmdbData);
-        
-        await MovieMetadata.create({
-          movie_id: movie.id,
-          ...metadataFields
-        });
+        metadataFields = tmdbService.extractMetadata(tmdbData);
       } catch (error) {
         console.error('Failed to fetch TMDB metadata:', error);
-        // Don't throw error - movie creation should succeed even if metadata fetch fails
       }
     }
+
+    const movie = await sequelize.transaction(async (t) => {
+      const existingMovieByName = await Movie.findOne({
+        where: sequelize.where(
+          sequelize.fn('LOWER', sequelize.col('movie_name')),
+          sequelize.fn('LOWER', movie_name.trim())
+        ),
+        transaction: t
+      });
+
+      if (existingMovieByName) {
+        throw { 
+          statusCode: 400, 
+          message: 'A movie with this name already exists' 
+        };
+      }
+
+      const created = await Movie.create({
+        movie_name: movie_name.trim(),
+        movie_data,
+        torrent_magnet: torrent_magnet.trim(),
+        movie_image_url: movie_image_url?.trim(),
+        user_id: userId
+      }, { transaction: t });
+
+      if (metadataFields) {
+        await MovieMetadata.create({
+          movie_id: created.id,
+          ...metadataFields
+        }, { transaction: t });
+      }
+
+      return created;
+    });
 
     return await this.getMovieById(movie.uuid);
   }
@@ -291,45 +297,47 @@ class MovieService {
       throw { statusCode: 400, message: 'Validation failed', errors: validationErrors };
     }
 
-    const movie = await Movie.findOne({ where: { uuid: movieUuid } });
+    await sequelize.transaction(async (t) => {
+      const movie = await Movie.findOne({ where: { uuid: movieUuid }, transaction: t });
 
-    if (!movie) {
-      throw { statusCode: 404, message: 'Movie not found' };
-    }
-
-    const { movie_name, movie_data, torrent_magnet, movie_image_url } = movieData;
-
-    const updateData = {
-      movie_data: movie_data !== undefined ? movie_data : movie.movie_data,
-      movie_image_url: movie_image_url ? movie_image_url.trim() : movie.movie_image_url
-    };
-
-    // Check if updating movie name and if it conflicts with existing (case-insensitive)
-    if (movie_name && movie_name.trim() && movie_name.trim().toLowerCase() !== movie.movie_name.toLowerCase()) {
-      const existingMovieByName = await Movie.findOne({
-        where: sequelize.where(
-          sequelize.fn('LOWER', sequelize.col('movie_name')),
-          sequelize.fn('LOWER', movie_name.trim())
-        )
-      });
-
-      if (existingMovieByName && existingMovieByName.id !== movie.id) {
-        throw { 
-          statusCode: 400, 
-          message: 'A movie with this name already exists' 
-        };
+      if (!movie) {
+        throw { statusCode: 404, message: 'Movie not found' };
       }
 
-      updateData.movie_name = movie_name.trim();
-    }
+      const { movie_name, movie_data, torrent_magnet, movie_image_url } = movieData;
 
-    if (torrent_magnet && torrent_magnet.trim()) {
-      updateData.torrent_magnet = torrent_magnet.trim();
-    }
+      const updateData = {
+        movie_data: movie_data !== undefined ? movie_data : movie.movie_data,
+        movie_image_url: movie_image_url ? movie_image_url.trim() : movie.movie_image_url
+      };
 
-    await movie.update(updateData);
+      if (movie_name && movie_name.trim() && movie_name.trim().toLowerCase() !== movie.movie_name.toLowerCase()) {
+        const existingMovieByName = await Movie.findOne({
+          where: sequelize.where(
+            sequelize.fn('LOWER', sequelize.col('movie_name')),
+            sequelize.fn('LOWER', movie_name.trim())
+          ),
+          transaction: t
+        });
 
-    return await this.getMovieById(movie.uuid);
+        if (existingMovieByName && existingMovieByName.id !== movie.id) {
+          throw { 
+            statusCode: 400, 
+            message: 'A movie with this name already exists' 
+          };
+        }
+
+        updateData.movie_name = movie_name.trim();
+      }
+
+      if (torrent_magnet && torrent_magnet.trim()) {
+        updateData.torrent_magnet = torrent_magnet.trim();
+      }
+
+      await movie.update(updateData, { transaction: t });
+    });
+
+    return await this.getMovieById(movieUuid);
   }
 
   async deleteMovie(movieUuid) {
@@ -337,13 +345,15 @@ class MovieService {
       throw { statusCode: 400, message: 'Invalid movie ID' };
     }
 
-    const movie = await Movie.findOne({ where: { uuid: movieUuid } });
+    await sequelize.transaction(async (t) => {
+      const movie = await Movie.findOne({ where: { uuid: movieUuid }, transaction: t });
 
-    if (!movie) {
-      throw { statusCode: 404, message: 'Movie not found' };
-    }
+      if (!movie) {
+        throw { statusCode: 404, message: 'Movie not found' };
+      }
 
-    await movie.destroy();
+      await movie.destroy({ transaction: t });
+    });
 
     return { message: 'Movie deleted successfully' };
   }

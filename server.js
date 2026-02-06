@@ -1,6 +1,7 @@
 import app from './src/app.js';
 import dotenv from 'dotenv';
 import sequelize from './src/config/database.js';
+import { startMovieImportWorker } from './src/workers/movieImportWorker.js';
 
 // Load environment variables
 dotenv.config();
@@ -16,10 +17,10 @@ const startServer = async () => {
 
     // Sync database models (creates tables if they don't exist)
     // Set DB_FORCE_SYNC=true in .env to drop and recreate all tables (development only)
-    const syncOptions = process.env.DB_FORCE_SYNC === 'true' 
-      ? { force: true } 
+    const syncOptions = process.env.DB_FORCE_SYNC === 'true'
+      ? { force: true }
       : {};
-    
+
     await sequelize.sync(syncOptions);
     console.log('✅ Database models synchronized.');
 
@@ -27,6 +28,12 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`🚀 Server is running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+
+      try {
+        startMovieImportWorker();
+      } catch (err) {
+        console.warn('⚠️ Movie import worker not started:', err.message);
+      }
     });
   } catch (error) {
     console.error('❌ Unable to start server:', error);

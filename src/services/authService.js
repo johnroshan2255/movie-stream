@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { User } from '../models/index.js';
+import sequelize from '../config/database.js';
 
 class AuthService {
   generateToken(id) {
@@ -55,16 +56,21 @@ class AuthService {
 
     const { username, email, password } = userData;
 
-    const existingUser = await User.findOne({ where: { email: email.toLowerCase().trim() } });
-    
-    if (existingUser) {
-      throw { statusCode: 400, message: 'User with this email already exists' };
-    }
+    const user = await sequelize.transaction(async (t) => {
+      const existingUser = await User.findOne({
+        where: { email: email.toLowerCase().trim() },
+        transaction: t
+      });
 
-    const user = await User.create({
-      username: username.trim(),
-      email: email.toLowerCase().trim(),
-      password
+      if (existingUser) {
+        throw { statusCode: 400, message: 'User with this email already exists' };
+      }
+
+      return await User.create({
+        username: username.trim(),
+        email: email.toLowerCase().trim(),
+        password
+      }, { transaction: t });
     });
 
     const token = this.generateToken(user.id);
